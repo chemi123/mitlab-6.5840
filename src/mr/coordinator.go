@@ -1,37 +1,51 @@
 package mr
 
-import "log"
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
-
+import (
+	"encoding/gob"
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
+)
 
 type Coordinator struct {
-	// Your definitions here.
-
+	normalTaskQueue TaskQueue
+	retryTaskQueue  TaskQueue
+	// TODO: need chan for exiting
 }
 
-// Your code here -- RPC handlers for the worker to call.
+func init() {
+	gob.Register(&MapTask{})
+	gob.Register(&ReduceTask{})
+}
 
-//
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+// func (c *Coordinator) TriggerReducerTasks(request *Request, response *Response) error {
+// }
+
+func (c *Coordinator) DispatchTask(request *DispatchTaskRequest, response *DispatchTaskResponse) error {
+	retryTask, ok := c.retryTaskQueue.Dequeue()
+	response.TaskFetchStatus = TaskAvailable
+	if ok {
+		response.Task = retryTask
+		return nil
+	}
+
+	normalTask, ok := c.normalTaskQueue.Dequeue()
+	if ok {
+		response.Task = normalTask
+		return nil
+	}
+
+	response.TaskFetchStatus = TaskNotReady
 	return nil
 }
 
-
-//
 // start a thread that listens for RPCs from worker.go
-//
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	//l, e := net.Listen("tcp", ":1234")
+	// l, e := net.Listen("tcp", ":1234")
 	sockname := coordinatorSock()
 	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)
@@ -41,30 +55,33 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-//
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
-//
 func (c *Coordinator) Done() bool {
 	ret := false
 
 	// Your code here.
 
-
 	return ret
 }
 
-//
-// create a Coordinator.
-// main/mrcoordinator.go calls this function.
-// nReduce is the number of reduce tasks to use.
-//
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+	c := &Coordinator{}
 
-	// Your code here.
+	for i, file := range files {
+		c.normalTaskQueue.Enqueue(
+			NewMapTask(
+				uint32(i),
+				file,
+				nReduce,
+			),
+		)
+	}
 
+	// TODO:: 以下を実施するスレッドを生やす
+	// - Dispatchしたtaskの完了確認
+	// - Map taskが全部完了したことを確認し、reduce
 
 	c.server()
-	return &c
+	return c
 }
