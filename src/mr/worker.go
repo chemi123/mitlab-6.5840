@@ -49,6 +49,7 @@ func doMap(
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -57,8 +58,13 @@ func doMap(
 
 	keyValueList := mapf(task.FileName, string(content))
 	fileMap := make(map[string]*os.File)
-	for _, kv := range keyValueList {
-		reduceId := ihash(kv.Key) % task.NumReduce
+	defer func() {
+		for _, file := range fileMap {
+			file.Close()
+		}
+	}()
+	for _, keyValue := range keyValueList {
+		reduceId := ihash(keyValue.Key) % task.NumReduce
 		intermediateFileName := fmt.Sprintf("mr-%d-%d", task.ID(), reduceId)
 		intermediateFile, ok := fileMap[intermediateFileName]
 		if !ok {
@@ -70,7 +76,9 @@ func doMap(
 			fileMap[intermediateFileName] = intermediateFile
 		}
 
-		fmt.Fprintf(intermediateFile, "%s %s\n", kv.Key, kv.Value)
+		if _, err := fmt.Fprintf(intermediateFile, "%s %s\n", keyValue.Key, keyValue.Value); err != nil {
+			return err
+		}
 	}
 
 	return nil
