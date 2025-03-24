@@ -61,6 +61,7 @@ func doMap(
 	defer func() {
 		for _, file := range fileMap {
 			file.Close()
+			os.Remove(file.Name())
 		}
 	}()
 	for _, keyValue := range keyValueList {
@@ -76,7 +77,12 @@ func doMap(
 			fileMap[intermediateFileName] = intermediateFile
 		}
 
-		if _, err := fmt.Fprintf(intermediateFile, "%s %s\n", keyValue.Key, keyValue.Value); err != nil {
+		if _, err := fmt.Fprintf(
+			intermediateFile,
+			"%s %s\n",
+			keyValue.Key,
+			keyValue.Value,
+		); err != nil {
 			return err
 		}
 	}
@@ -87,7 +93,8 @@ func doMap(
 func doReduce(
 	reducef func(string, []string) string,
 	task *ReduceTask,
-) {
+) error {
+	return nil
 }
 
 func callDipatchTask() (*DispatchTaskResponse, bool) {
@@ -126,7 +133,6 @@ func Worker(
 		switch t := response.Task.(type) {
 		case *MapTask:
 			err := doMap(mapf, response.Task.(*MapTask))
-			// errがnil出ない場合は一旦は出力だけして次に進む
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err.Error())
 			}
