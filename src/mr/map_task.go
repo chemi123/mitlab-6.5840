@@ -1,21 +1,21 @@
 package mr
 
 type MapTask struct {
-	Id        uint32
+	Metadata  *TaskMetadata
 	FileName  string
 	NumReduce int
 }
 
 var _ Task = &MapTask{}
 
-func NewMapTask(id uint32, fileName string, numReduce int) *MapTask {
+func NewMapTask(metadata *TaskMetadata, fileName string, numReduce int) *MapTask {
 	return &MapTask{
-		Id:        id,
-		FileName:  fileName,
-		NumReduce: numReduce,
+		metadata,
+		fileName,
+		numReduce,
 	}
 }
 
-func (mapperTask *MapTask) ID() uint32 {
-	return mapperTask.Id
+func (m *MapTask) GetMetadata() *TaskMetadata {
+	return m.Metadata
 }

@@ -11,16 +11,23 @@ const (
 	TaskAvailable TaskFetchStatus = iota
 	TaskNotReady
 	NoMoreTasks
-	TaskTimedout
 	CoordinatorExit
 )
 
-type DispatchTaskRequest struct{}
+type (
+	DispatchTaskRequest  struct{}
+	DispatchTaskResponse struct {
+		TaskFetchStatus
+		Task
+	}
+)
 
-type DispatchTaskResponse struct {
-	TaskFetchStatus
-	Task
-}
+type (
+	MarkTaskCompleteRequest struct {
+		Task
+	}
+	MarkTaskCompleteResponse struct{}
+)
 
 func coordinatorSock() string {
 	s := "/var/tmp/5840-mr-"

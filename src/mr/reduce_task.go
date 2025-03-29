@@ -1,17 +1,19 @@
 package mr
 
 type ReduceTask struct {
-	Id uint32
+	Metadata   *TaskMetadata
+	MapTaskNum int
 }
 
 var _ Task = &ReduceTask{}
 
-func NewReduceTask(id uint32) *ReduceTask {
+func NewReduceTask(taskMetadata *TaskMetadata, mapTaskNum int) *ReduceTask {
 	return &ReduceTask{
-		Id: id,
+		taskMetadata,
+		mapTaskNum,
 	}
 }
 
-func (r *ReduceTask) ID() uint32 {
-	return r.Id
+func (r *ReduceTask) GetMetadata() *TaskMetadata {
+	return r.Metadata
 }

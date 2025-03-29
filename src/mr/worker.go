@@ -1,12 +1,14 @@
 package mr
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"log"
 	"net/rpc"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -37,7 +39,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	fmt.Fprintln(os.Stderr, err.Error())
 	return false
 }
 
@@ -61,12 +63,11 @@ func doMap(
 	defer func() {
 		for _, file := range fileMap {
 			file.Close()
-			os.Remove(file.Name())
 		}
 	}()
 	for _, keyValue := range keyValueList {
 		reduceId := ihash(keyValue.Key) % task.NumReduce
-		intermediateFileName := fmt.Sprintf("mr-%d-%d", task.ID(), reduceId)
+		intermediateFileName := fmt.Sprintf("mr-%d-%d", task.GetMetadata().ID, reduceId)
 		intermediateFile, ok := fileMap[intermediateFileName]
 		if !ok {
 			file, err := os.Create(intermediateFileName)
@@ -94,19 +95,72 @@ func doReduce(
 	reducef func(string, []string) string,
 	task *ReduceTask,
 ) error {
+	reduceID := task.Metadata.ID
+	keyValues := make(map[string][]string)
+	for i := 0; i < task.MapTaskNum; i++ {
+		intermediateFileName := fmt.Sprintf("mr-%d-%d", i, reduceID)
+		intermediateFile, err := os.Open(intermediateFileName)
+		if err != nil {
+			return err
+		}
+		defer intermediateFile.Close()
+
+		content, err := io.ReadAll(intermediateFile)
+		if err != nil {
+			return err
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+
+			parts := strings.Fields(line)
+			if len(parts) != 2 {
+				fmt.Fprintf(os.Stderr, "invalid line format: %q\n", line)
+				continue
+			}
+			key, value := parts[0], parts[1]
+			keyValues[key] = append(keyValues[key], value)
+		}
+	}
+
+	reduceOutputFileName := fmt.Sprintf("mr-out-%", reduceID)
+	reduceOutputFile, err := os.Create(reduceOutputFileName)
+	if err != nil {
+		return err
+	}
+
+	for key, values := range keyValues {
+		if _, err := fmt.Fprintf(reduceOutputFile, "%s %s", key, reducef(key, values)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func callDipatchTask() (*DispatchTaskResponse, bool) {
+func callDipatchTask() (*DispatchTaskResponse, error) {
 	request := &DispatchTaskRequest{}
 	response := &DispatchTaskResponse{}
 
 	ok := call("Coordinator.DispatchTask", request, response)
 	if !ok {
-		fmt.Fprintln(os.Stderr, "rpc call for Coordinator.DispatchTask failed")
-		return nil, false
+		return nil, fmt.Errorf("rpc call for Coordinator.DispatchTask failed")
 	}
-	return response, ok
+	return response, nil
+}
+
+func callMarkTaskComplete(task Task) error {
+	request := &MarkTaskCompleteRequest{task}
+	response := &MarkTaskCompleteResponse{}
+
+	ok := call("Coordinator.MarkTaskComplete", request, response)
+	if !ok {
+		return fmt.Errorf("rpc call for Coordinator.MarkTaskComplete failed")
+	}
+
+	return nil
 }
 
 func Worker(
@@ -114,8 +168,10 @@ func Worker(
 	reducef func(string, []string) string,
 ) {
 	for {
-		response, ok := callDipatchTask()
-		if !ok {
+		response, err := callDipatchTask()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err.Error()+". Retry in 3 seconds")
+			time.Sleep(3 * time.Second)
 			continue
 		}
 
@@ -126,20 +182,52 @@ func Worker(
 
 		if response.TaskFetchStatus == TaskNotReady {
 			fmt.Println("Next task is not ready yet.")
-			time.Sleep(1 * time.Second)
+			time.Sleep(3 * time.Second)
 			continue
 		}
 
-		switch t := response.Task.(type) {
-		case *MapTask:
-			err := doMap(mapf, response.Task.(*MapTask))
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err.Error())
-			}
-		case *ReduceTask:
-			doReduce(reducef, response.Task.(*ReduceTask))
-		default:
-			fmt.Fprintf(os.Stderr, "Unknown or nil Task type: %T\n", t)
+		if err := worker(mapf, reducef, response.Task); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+		}
+
+	}
+}
+
+func worker(
+	mapf func(string, string) []KeyValue,
+	reducef func(string, []string) string,
+	task Task,
+) error {
+	taskMetadata := task.GetMetadata()
+
+	ctx, cancel := context.WithTimeout(context.Background(), TaskTimedout-time.Since(taskMetadata.StartTime))
+	defer cancel()
+	done := make(chan error, 1)
+
+	switch t := task.(type) {
+	case *MapTask:
+		go func() {
+			done <- doMap(mapf, task.(*MapTask))
+		}()
+	case *ReduceTask:
+		go func() {
+			done <- doReduce(reducef, task.(*ReduceTask))
+		}()
+	default:
+		return fmt.Errorf("Unknown or nil Task type: %T\n", t)
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("task %d timedout", taskMetadata.ID)
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+
+		if err = callMarkTaskComplete(task); err != nil {
+			return err
 		}
 	}
+	return nil
 }

@@ -1,28 +1,37 @@
 package mr
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
-type TaskQueue struct {
+type TaskEntryQueue struct {
 	mu    sync.Mutex
-	tasks []Task
+	Tasks []Task
 }
 
-func (queue *TaskQueue) Enqueue(task Task) {
+func (queue *TaskEntryQueue) Enqueue(task Task) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
-	queue.tasks = append(queue.tasks, task)
+	metadata := task.GetMetadata()
+	metadata.TaskStatus = Inqueue
+	queue.Tasks = append(queue.Tasks, task)
 }
 
-func (queue *TaskQueue) Dequeue() (Task, bool) {
+func (queue *TaskEntryQueue) Dequeue() (Task, bool) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 
-	if len(queue.tasks) == 0 {
+	if len(queue.Tasks) == 0 {
 		return nil, false
 	}
 
-	task := queue.tasks[0]
-	queue.tasks = queue.tasks[1:]
+	task := queue.Tasks[0]
+	queue.Tasks = queue.Tasks[1:]
+
+	metadata := task.GetMetadata()
+	metadata.StartTime = time.Now()
+	metadata.TaskStatus = Started
 
 	return task, true
 }
