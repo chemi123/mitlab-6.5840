@@ -4,6 +4,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -82,7 +83,7 @@ func (c *Coordinator) MarkTaskComplete(
 	metadata := task.GetMetadata()
 	metadata.TaskStatus = Complete
 
-	fmt.Println(metadata.Type, metadata.ID, "is done")
+	slog.Debug(fmt.Sprintf("%d %d is done", metadata.Type, metadata.ID))
 
 	c.updateCoordinatorPhase()
 
@@ -131,9 +132,9 @@ func (c *Coordinator) updateCoordinatorPhase() {
 		c.CoordinatorPhase = CompletePhase
 		close(c.done)
 	case CompletePhase:
-		fmt.Println("Complete phase. closing...")
+		slog.Info("Complete phase. closing...")
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown phase %d", c.CoordinatorPhase)
+		slog.Error(fmt.Sprintf("Unknown phase %d", c.CoordinatorPhase))
 	}
 }
 
@@ -153,7 +154,7 @@ func (c *Coordinator) server() {
 func (c *Coordinator) Done() bool {
 	select {
 	case <-c.done:
-		fmt.Println("All tasks completed! finish coordinator process")
+		slog.Info("All tasks completed! finish coordinator process")
 		return true
 	default:
 		return false
@@ -203,7 +204,7 @@ func (c *Coordinator) reassignTimedOutTasks() {
 			}
 
 			if time.Since(taskMetadata.StartTime) >= TaskTimedout {
-				fmt.Println("timedout. enqueue", task.GetMetadata().ID)
+				slog.Error(fmt.Sprintf("timedout. enqueue %d %d", taskMetadata.Type, task.GetMetadata().ID))
 				c.retryTaskQueue.Enqueue(task)
 			}
 		}

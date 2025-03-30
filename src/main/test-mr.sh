@@ -346,13 +346,13 @@ function summary() {
 }
 
 function main() {
-  #wc_test
-  #indexer_test
+  wc_test
+  indexer_test
   map_parallelism_test
-  #reduce_parallelism_test
-  #job_count_test
-  #early_exit_test
-  #crash_test
+  reduce_parallelism_test
+  job_count_test
+  early_exit_test
+  crash_test
   summary
 }
 

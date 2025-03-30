@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"io"
 	"log"
+	"log/slog"
 	"net/rpc"
 	"os"
 	"strings"
@@ -39,7 +40,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Fprintln(os.Stderr, err.Error())
+	slog.Error(err.Error())
 	return false
 }
 
@@ -101,7 +102,7 @@ func doReduce(
 		intermediateFileName := fmt.Sprintf("mr-%d-%d", i, reduceID)
 		intermediateFile, err := os.Open(intermediateFileName)
 		if err != nil {
-			return err
+			continue
 		}
 		defer intermediateFile.Close()
 
@@ -118,7 +119,7 @@ func doReduce(
 
 			parts := strings.Fields(line)
 			if len(parts) != 2 {
-				fmt.Fprintf(os.Stderr, "invalid line format: %q\n", line)
+				slog.Error(fmt.Sprintf("invalid line format: %q\n", line))
 				continue
 			}
 			key, value := parts[0], parts[1]
@@ -170,24 +171,23 @@ func Worker(
 	for {
 		response, err := callDipatchTask()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error()+". Retry in 3 seconds")
+			slog.Error(err.Error() + ". Retry in 3 seconds")
 			time.Sleep(3 * time.Second)
 			continue
 		}
 
 		if response.TaskFetchStatus == TaskNotReady {
-			fmt.Println("Next task is not ready yet.")
 			time.Sleep(3 * time.Second)
 			continue
 		}
 
 		if response.TaskFetchStatus == NomoreTasks {
-			fmt.Println("No more tasks to proceed")
+			slog.Info("No more tasks to proceed")
 			break
 		}
 
 		if err := worker(mapf, reducef, response.Task); err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
+			slog.Error(err.Error())
 		}
 
 	}
