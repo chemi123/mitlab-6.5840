@@ -126,14 +126,14 @@ func doReduce(
 		}
 	}
 
-	reduceOutputFileName := fmt.Sprintf("mr-out-%", reduceID)
+	reduceOutputFileName := fmt.Sprintf("mr-out-%d", reduceID)
 	reduceOutputFile, err := os.Create(reduceOutputFileName)
 	if err != nil {
 		return err
 	}
 
 	for key, values := range keyValues {
-		if _, err := fmt.Fprintf(reduceOutputFile, "%s %s", key, reducef(key, values)); err != nil {
+		if _, err := fmt.Fprintf(reduceOutputFile, "%s %s\n", key, reducef(key, values)); err != nil {
 			return err
 		}
 	}
@@ -175,15 +175,15 @@ func Worker(
 			continue
 		}
 
-		if response.TaskFetchStatus == NoMoreTasks || response.TaskFetchStatus == CoordinatorExit {
-			fmt.Println("No more tasks to proceed")
-			break
-		}
-
 		if response.TaskFetchStatus == TaskNotReady {
 			fmt.Println("Next task is not ready yet.")
 			time.Sleep(3 * time.Second)
 			continue
+		}
+
+		if response.TaskFetchStatus == NomoreTasks {
+			fmt.Println("No more tasks to proceed")
+			break
 		}
 
 		if err := worker(mapf, reducef, response.Task); err != nil {
@@ -219,7 +219,7 @@ func worker(
 
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("task %d timedout", taskMetadata.ID)
+		return fmt.Errorf("task %d %d timedout", taskMetadata.Type, taskMetadata.ID)
 	case err := <-done:
 		if err != nil {
 			return err

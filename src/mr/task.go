@@ -16,7 +16,7 @@ const (
 
 const (
 	Inqueue TaskStatus = iota
-	Started
+	Running
 	Complete
 )
 
@@ -32,9 +32,4 @@ type TaskMetadata struct {
 	TaskIdent
 	TaskStatus
 	StartTime time.Time
-}
-
-func (t *TaskMetadata) Start() {
-	t.TaskStatus = Started
-	t.StartTime = time.Now()
 }

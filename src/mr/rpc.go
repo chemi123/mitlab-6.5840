@@ -10,8 +10,7 @@ type TaskFetchStatus uint32
 const (
 	TaskAvailable TaskFetchStatus = iota
 	TaskNotReady
-	NoMoreTasks
-	CoordinatorExit
+	NomoreTasks
 )
 
 type (

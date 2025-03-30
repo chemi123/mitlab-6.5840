@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const TaskTimedout = 10 * time.Second
+type CoordinatorPhase uint
 
 type Coordinator struct {
 	normalTaskQueue   TaskEntryQueue
@@ -20,8 +20,17 @@ type Coordinator struct {
 	mapTaskNum        int
 	reduceTaskNum     int
 	isReduceTaskPhase bool
-	// TODO: need chan for exiting
+	done              chan struct{}
+	CoordinatorPhase
 }
+
+const TaskTimedout = 10 * time.Second
+
+const (
+	MapPhase CoordinatorPhase = iota
+	ReducePhase
+	CompletePhase
+)
 
 func init() {
 	gob.Register(&MapTask{})
@@ -31,6 +40,11 @@ func init() {
 func (c *Coordinator) DispatchTask(request *DispatchTaskRequest, response *DispatchTaskResponse) error {
 	if response == nil {
 		return fmt.Errorf("response field is nil")
+	}
+
+	if c.CoordinatorPhase == CompletePhase {
+		response.TaskFetchStatus = NomoreTasks
+		return nil
 	}
 
 	response.TaskFetchStatus = TaskAvailable
@@ -70,14 +84,32 @@ func (c *Coordinator) MarkTaskComplete(
 
 	fmt.Println(metadata.Type, metadata.ID, "is done")
 
-	c.updatePhaseIfNeeded()
+	c.updateCoordinatorPhase()
 
 	return nil
 }
 
-func (c *Coordinator) updatePhaseIfNeeded() {
-	if !c.isReduceTaskPhase && c.allMapTasksCompleted() {
-		c.isReduceTaskPhase = true
+func (c *Coordinator) isTaskTypeComplete(taskType TaskType) bool {
+	for _, task := range c.taskMap {
+		taskMetadata := task.GetMetadata()
+		if taskMetadata.Type != taskType {
+			continue
+		}
+
+		if taskMetadata.TaskStatus != Complete {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Coordinator) updateCoordinatorPhase() {
+	switch c.CoordinatorPhase {
+	case MapPhase:
+		if !c.isTaskTypeComplete(MapType) {
+			return
+		}
+		c.CoordinatorPhase = ReducePhase
 		for i := 0; i < c.reduceTaskNum; i++ {
 			taskIdent := TaskIdent{
 				ReduceType,
@@ -92,25 +124,19 @@ func (c *Coordinator) updatePhaseIfNeeded() {
 			c.normalTaskQueue.Enqueue(reduceTask)
 			c.taskMap[taskIdent] = reduceTask
 		}
+	case ReducePhase:
+		if !c.isTaskTypeComplete(ReduceType) {
+			return
+		}
+		c.CoordinatorPhase = CompletePhase
+		close(c.done)
+	case CompletePhase:
+		fmt.Println("Complete phase. closing...")
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown phase %d", c.CoordinatorPhase)
 	}
 }
 
-func (c *Coordinator) allMapTasksCompleted() bool {
-	for _, task := range c.taskMap {
-		// この時点でreducetaskはないが一応行っておく
-		mapTask, ok := task.(*MapTask)
-		if !ok {
-			continue
-		}
-		taskMetadata := mapTask.GetMetadata()
-		if taskMetadata.TaskStatus != Complete {
-			return false
-		}
-	}
-	return true
-}
-
-// start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
@@ -124,20 +150,22 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-// main/mrcoordinator.go calls Done() periodically to find out
-// if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	select {
+	case <-c.done:
+		fmt.Println("All tasks completed! finish coordinator process")
+		return true
+	default:
+		return false
+	}
 }
 
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := &Coordinator{
-		mapTaskNum:    len(files),
-		reduceTaskNum: nReduce,
+		mapTaskNum:       len(files),
+		reduceTaskNum:    nReduce,
+		done:             make(chan struct{}),
+		CoordinatorPhase: MapPhase,
 	}
 
 	c.taskMap = make(map[TaskIdent]Task)
@@ -170,7 +198,7 @@ func (c *Coordinator) reassignTimedOutTasks() {
 	for range ticker.C {
 		for _, task := range c.taskMap {
 			taskMetadata := task.GetMetadata()
-			if taskMetadata.TaskStatus != Started {
+			if taskMetadata.TaskStatus != Running {
 				continue
 			}
 

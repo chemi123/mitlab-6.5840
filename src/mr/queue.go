@@ -31,7 +31,7 @@ func (queue *TaskEntryQueue) Dequeue() (Task, bool) {
 
 	metadata := task.GetMetadata()
 	metadata.StartTime = time.Now()
-	metadata.TaskStatus = Started
+	metadata.TaskStatus = Running
 
 	return task, true
 }
