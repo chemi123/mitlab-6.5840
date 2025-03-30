@@ -15,13 +15,12 @@ import (
 type CoordinatorPhase uint
 
 type Coordinator struct {
-	normalTaskQueue   TaskEntryQueue
-	retryTaskQueue    TaskEntryQueue
-	taskMap           map[TaskIdent]Task
-	mapTaskNum        int
-	reduceTaskNum     int
-	isReduceTaskPhase bool
-	done              chan struct{}
+	normalTaskQueue TaskEntryQueue
+	retryTaskQueue  TaskEntryQueue
+	taskMap         map[TaskIdent]Task
+	mapTaskNum      int
+	reduceTaskNum   int
+	done            chan struct{}
 	CoordinatorPhase
 }
 
