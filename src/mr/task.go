@@ -1,9 +1,5 @@
 package mr
 
-import (
-	"time"
-)
-
 type (
 	TaskType   uint32
 	TaskStatus uint32
@@ -27,9 +23,4 @@ type Task interface {
 type TaskIdent struct {
 	Type TaskType
 	ID   uint32
-}
-type TaskMetadata struct {
-	TaskIdent
-	TaskStatus
-	StartTime time.Time
 }

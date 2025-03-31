@@ -17,7 +17,7 @@ type CoordinatorPhase uint
 type Coordinator struct {
 	normalTaskQueue TaskEntryQueue
 	retryTaskQueue  TaskEntryQueue
-	taskMap         map[TaskIdent]Task
+	taskMap         *SafeTaskMap
 	mapTaskNum      int
 	reduceTaskNum   int
 	done            chan struct{}
@@ -72,7 +72,7 @@ func (c *Coordinator) MarkTaskComplete(
 		return fmt.Errorf("request or response fieid is nil")
 	}
 
-	task, ok := c.taskMap[request.Task.GetMetadata().TaskIdent]
+	task, ok := c.taskMap.Get(request.Task.GetMetadata().TaskIdent)
 	if !ok {
 		return fmt.Errorf(
 			"taskId: %d is not registered in coordinator. something is wrong\n",
@@ -80,7 +80,7 @@ func (c *Coordinator) MarkTaskComplete(
 		)
 	}
 	metadata := task.GetMetadata()
-	metadata.TaskStatus = Complete
+	metadata.SetStatus(Complete)
 
 	slog.Debug(fmt.Sprintf("%d %d is done", metadata.Type, metadata.ID))
 
@@ -90,17 +90,19 @@ func (c *Coordinator) MarkTaskComplete(
 }
 
 func (c *Coordinator) isTaskTypeComplete(taskType TaskType) bool {
-	for _, task := range c.taskMap {
+	isComplete := true
+	c.taskMap.Range(func(_ TaskIdent, task Task) {
 		taskMetadata := task.GetMetadata()
 		if taskMetadata.Type != taskType {
-			continue
+			return
 		}
 
-		if taskMetadata.TaskStatus != Complete {
-			return false
+		if taskMetadata.GetStatus() != Complete {
+			isComplete = false
 		}
-	}
-	return true
+	})
+
+	return isComplete
 }
 
 func (c *Coordinator) updateCoordinatorPhase() {
@@ -116,13 +118,13 @@ func (c *Coordinator) updateCoordinatorPhase() {
 				uint32(i),
 			}
 			taskMetadata := &TaskMetadata{
-				taskIdent,
-				Inqueue,
-				time.Now().Add(100 * time.Hour),
+				TaskIdent:  taskIdent,
+				TaskStatus: Inqueue,
+				StartTime:  time.Now().Add(100 * time.Hour),
 			}
 			reduceTask := NewReduceTask(taskMetadata, c.mapTaskNum)
 			c.normalTaskQueue.Enqueue(reduceTask)
-			c.taskMap[taskIdent] = reduceTask
+			c.taskMap.Set(taskIdent, reduceTask)
 		}
 	case ReducePhase:
 		if !c.isTaskTypeComplete(ReduceType) {
@@ -166,9 +168,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		reduceTaskNum:    nReduce,
 		done:             make(chan struct{}),
 		CoordinatorPhase: MapPhase,
+		taskMap:          NewSafeTaskMap(),
 	}
 
-	c.taskMap = make(map[TaskIdent]Task)
 	for i, file := range files {
 		taskIdent := TaskIdent{
 			MapType,
@@ -180,9 +182,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			TaskStatus: Inqueue,
 		}
 
-		task := NewMapTask(&taskMetadata, file, nReduce)
-		c.normalTaskQueue.Enqueue(task)
-		c.taskMap[taskIdent] = task
+		mapTask := NewMapTask(&taskMetadata, file, nReduce)
+		c.normalTaskQueue.Enqueue(mapTask)
+		c.taskMap.Set(taskIdent, mapTask)
 	}
 
 	go c.reassignTimedOutTasks()
@@ -196,16 +198,16 @@ func (c *Coordinator) reassignTimedOutTasks() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		for _, task := range c.taskMap {
+		c.taskMap.Range(func(_ TaskIdent, task Task) {
 			taskMetadata := task.GetMetadata()
-			if taskMetadata.TaskStatus != Running {
-				continue
+			if taskMetadata.GetStatus() != Running {
+				return
 			}
 
-			if time.Since(taskMetadata.StartTime) >= TaskTimedout {
-				slog.Error(fmt.Sprintf("timedout. enqueue %d %d", taskMetadata.Type, task.GetMetadata().ID))
+			if time.Since(taskMetadata.GetStartTime()) >= TaskTimedout {
+				slog.Error(fmt.Sprintf("timedout. enqueue %d %d", taskMetadata.Type, taskMetadata.ID))
 				c.retryTaskQueue.Enqueue(task)
 			}
-		}
+		})
 	}
 }

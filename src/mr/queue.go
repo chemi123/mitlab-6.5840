@@ -14,7 +14,7 @@ func (queue *TaskEntryQueue) Enqueue(task Task) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 	metadata := task.GetMetadata()
-	metadata.TaskStatus = Inqueue
+	metadata.SetStatus(Inqueue)
 	queue.Tasks = append(queue.Tasks, task)
 }
 
@@ -30,8 +30,8 @@ func (queue *TaskEntryQueue) Dequeue() (Task, bool) {
 	queue.Tasks = queue.Tasks[1:]
 
 	metadata := task.GetMetadata()
-	metadata.StartTime = time.Now()
-	metadata.TaskStatus = Running
+	metadata.SetStartTime(time.Now())
+	metadata.SetStatus(Running)
 
 	return task, true
 }
